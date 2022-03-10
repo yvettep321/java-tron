@@ -10,6 +10,9 @@ def slf4jVersion = "1.7.25"
 // --------------------------------------
 
 dependencies {
+    //local libraries
+    compile fileTree(dir: 'libs', include: '*.jar')
+    // end local libraries
     compile project(":chainbase")
     compile project(":protocol")
     compile project(":crypto")
@@ -23,6 +26,8 @@ dependencies {
     compile 'com.github.tronprotocol:zksnark-java-sdk:master-SNAPSHOT'
     compile group: 'commons-codec', name: 'commons-codec', version: '1.11'
     compile 'org.reflections:reflections:0.9.11'
+
+    implementation 'net.java.dev.jna:jna:5.10.0'
 }
 
 test {

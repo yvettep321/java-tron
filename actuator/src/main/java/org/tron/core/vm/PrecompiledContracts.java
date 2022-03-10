@@ -1,6 +1,7 @@
 package org.tron.core.vm;
 
 import static java.util.Arrays.copyOfRange;
+import static org.hyperledger.besu.nativelib.secp256k1.LibSecp256k1.SECP256K1_EC_UNCOMPRESSED;
 import static org.tron.common.runtime.vm.DataWord.WORD_SIZE;
 import static org.tron.common.utils.BIUtil.addSafely;
 import static org.tron.common.utils.BIUtil.isLessThan;
@@ -17,6 +18,7 @@ import static org.tron.core.config.Parameter.ChainConstant.TRX_PRECISION;
 
 import com.google.protobuf.ByteString;
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -29,13 +31,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+
+import com.sun.jna.ptr.LongByReference;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.tuple.Pair;
+import org.hyperledger.besu.nativelib.secp256k1.LibSecp256k1;
 import org.tron.common.crypto.Blake2bfMessageDigest;
+import org.tron.common.crypto.ECKey;
 import org.tron.common.crypto.Hash;
 import org.tron.common.crypto.SignUtils;
 import org.tron.common.crypto.SignatureInterface;
@@ -468,8 +474,10 @@ public class PrecompiledContracts {
         SignatureInterface signature = SignUtils.fromComponents(r, s, v[31]
             , CommonParameter.getInstance().isECKeyCryptoEngine());
         if (validateV(v) && signature.validateComponents()) {
-          out = new DataWord(SignUtils.signatureToAddress(h, signature
-              , CommonParameter.getInstance().isECKeyCryptoEngine()));
+//          out = new DataWord(SignUtils.signatureToAddress(h, signature
+//              , CommonParameter.getInstance().isECKeyCryptoEngine()));
+          out = new DataWord(Hash.computeAddress(
+              recoverFromSignatureNative(h, (ECKey.ECDSASignature)signature)));
         }
       } catch (Throwable any) {
       }
@@ -479,6 +487,39 @@ public class PrecompiledContracts {
       } else {
         return Pair.of(true, out.getData());
       }
+    }
+
+    private byte[] recoverFromSignatureNative(
+        final byte[] dataHash, final ECKey.ECDSASignature sig) {
+
+      // parse the sig
+      final LibSecp256k1.secp256k1_ecdsa_recoverable_signature parsedSignature =
+          new LibSecp256k1.secp256k1_ecdsa_recoverable_signature();
+      final byte[] encodedSig = sig.toByteArray();
+      if (LibSecp256k1.secp256k1_ecdsa_recoverable_signature_parse_compact(
+          LibSecp256k1.CONTEXT,
+          parsedSignature,
+          Arrays.copyOfRange(encodedSig, 0, 64),
+          encodedSig[64])
+          == 0) {
+        throw new IllegalArgumentException("Could not parse signature");
+      }
+
+      // recover the key
+      final LibSecp256k1.secp256k1_pubkey newPubKey = new LibSecp256k1.secp256k1_pubkey();
+      if (LibSecp256k1.secp256k1_ecdsa_recover(
+          LibSecp256k1.CONTEXT, newPubKey, parsedSignature, dataHash)
+          == 0) {
+        return new byte[0];
+      }
+
+      // parse the key
+      final ByteBuffer recoveredKey = ByteBuffer.allocate(65);
+      final LongByReference keySize = new LongByReference(recoveredKey.limit());
+      LibSecp256k1.secp256k1_ec_pubkey_serialize(
+          LibSecp256k1.CONTEXT, recoveredKey, keySize, newPubKey, SECP256K1_EC_UNCOMPRESSED);
+
+      return recoveredKey.array();
     }
   }
 

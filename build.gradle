@@ -19,6 +19,9 @@ subprojects {
             mavenCentral()
             jcenter()
             maven { url 'https://jitpack.io' }
+            maven { url "https://artifacts.consensys.net/public/maven/maven/" }
+            maven { url "https://splunk.jfrog.io/splunk/ext-releases-local" }
+            maven { url "https://dl.cloudsmith.io/public/consensys/quorum-mainnet-launcher/maven/"}
         }
         dependencies {
             classpath 'com.google.protobuf:protobuf-gradle-plugin:0.8.12'
