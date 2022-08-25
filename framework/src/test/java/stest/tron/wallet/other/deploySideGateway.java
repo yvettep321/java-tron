@@ -48,7 +48,7 @@ public class deploySideGateway {
   private WalletSolidityGrpc.WalletSolidityBlockingStub blockingStubSolidity = null;
   private String fullnode = "127.0.0.1:50151";
 
-  
+
 
   /**
    * constructor.
