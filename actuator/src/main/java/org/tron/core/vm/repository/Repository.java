@@ -4,7 +4,7 @@ import org.tron.common.runtime.vm.DataWord;
 import org.tron.core.capsule.*;
 import org.tron.core.store.*;
 import org.tron.core.vm.program.Storage;
-import org.tron.protos.Protocol;
+import org.tron.protos.Protocol.AccountType;
 
 public interface Repository {
 
@@ -18,17 +18,21 @@ public interface Repository {
 
   DelegationStore getDelegationStore();
 
-  AccountCapsule createAccount(byte[] address, Protocol.AccountType type);
+  WitnessStore getWitnessStore();
 
-  AccountCapsule createAccount(byte[] address, String accountName, Protocol.AccountType type);
+  AccountCapsule createAccount(byte[] address, AccountType type);
+
+  AccountAssetIssueCapsule createAccountAssetIssue(byte[] address);
+
+  AccountCapsule createAccount(byte[] address, String accountName, AccountType type);
 
   AccountCapsule getAccount(byte[] address);
 
-  BytesCapsule getDynamicProperty(byte[] bytesKey);
+  AccountAssetIssueCapsule getAccountAssetIssue(byte[] address);
 
-  DelegatedResourceCapsule getDelegatedResource(byte[] key);
+  BytesCapsule getDynamic(byte[] bytesKey);
 
-  VotesCapsule getVotes(byte[] address);
+  VotesCapsule getVotesCapsule(byte[] address);
 
   long getBeginCycle(byte[] address);
 
@@ -36,7 +40,7 @@ public interface Repository {
 
   AccountCapsule getAccountVote(long cycle, byte[] address);
 
-  BytesCapsule getDelegation(Key key);
+  BytesCapsule getDelegationCache(Key key);
 
   void deleteContract(byte[] address);
 
@@ -48,11 +52,11 @@ public interface Repository {
 
   void updateAccount(byte[] address, AccountCapsule accountCapsule);
 
-  void updateDynamicProperty(byte[] word, BytesCapsule bytesCapsule);
+  void updateAccountAssetIssue(byte[] address, AccountAssetIssueCapsule accountAssetIssueCapsule);
 
-  void updateDelegatedResource(byte[] word, DelegatedResourceCapsule delegatedResourceCapsule);
+  void updateDynamic(byte[] word, BytesCapsule bytesCapsule);
 
-  void updateVotes(byte[] word, VotesCapsule votesCapsule);
+  void updateVotesCapsule(byte[] word, VotesCapsule votesCapsule);
 
   void updateBeginCycle(byte[] word, long cycle);
 
@@ -60,7 +64,11 @@ public interface Repository {
 
   void updateAccountVote(byte[] word, long cycle, AccountCapsule accountCapsule);
 
+  void updateRemark(byte[] word, long cycle);
+
   void updateDelegation(byte[] word, BytesCapsule bytesCapsule);
+
+  void updateLastWithdrawCycle(byte[] address, long cycle);
 
   void saveCode(byte[] address, byte[] code);
 
@@ -84,6 +92,8 @@ public interface Repository {
 
   void putAccount(Key key, Value value);
 
+  void putAccountAssetIssue(Key key, Value value);
+
   void putCode(Key key, Value value);
 
   void putContract(Key key, Value value);
@@ -92,11 +102,15 @@ public interface Repository {
 
   void putAccountValue(byte[] address, AccountCapsule accountCapsule);
 
-  void putDynamicProperty(Key key, Value value);
+  void putAccountAssetIssueValue(byte[] address, AccountAssetIssueCapsule accountCapsule);
 
-  void putDelegatedResource(Key key, Value value);
+  void putDynamic(Key key, Value value);
 
-  void putVotes(Key key, Value value);
+  void putAssetIssue(Key key, Value value);
+
+  void putVotesCapsule(Key key, Value value);
+
+  void putAssetIssueValue(byte[] tokenId, AssetIssueCapsule assetIssueCapsule);
 
   void putDelegation(Key key, Value value);
 
@@ -114,18 +128,15 @@ public interface Repository {
 
   AccountCapsule createNormalAccount(byte[] address);
 
-  WitnessCapsule getWitness(byte[] address);
+  WitnessCapsule getWitnessCapsule(byte[] address);
+
+  void saveTokenIdNum(long num);
+
+  long getTokenIdNum();
 
   void addTotalNetWeight(long amount);
 
-  void addTotalEnergyWeight(long amount);
-
   void saveTotalNetWeight(long totalNetWeight);
 
-  void saveTotalEnergyWeight(long totalEnergyWeight);
-
   long getTotalNetWeight();
-
-  long getTotalEnergyWeight();
-
 }

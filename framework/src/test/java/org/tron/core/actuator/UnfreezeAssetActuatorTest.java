@@ -15,6 +15,7 @@ import org.tron.common.utils.FileUtil;
 import org.tron.common.utils.StringUtil;
 import org.tron.core.Constant;
 import org.tron.core.Wallet;
+import org.tron.core.capsule.AccountAssetIssueCapsule;
 import org.tron.core.capsule.AccountCapsule;
 import org.tron.core.capsule.AssetIssueCapsule;
 import org.tron.core.capsule.TransactionResultCapsule;
@@ -25,6 +26,7 @@ import org.tron.core.exception.ContractExeException;
 import org.tron.core.exception.ContractValidateException;
 import org.tron.protos.Protocol.Account;
 import org.tron.protos.Protocol.Account.Frozen;
+import org.tron.protos.Protocol.AccountAssetIssue;
 import org.tron.protos.Protocol.AccountType;
 import org.tron.protos.Protocol.Transaction.Result.code;
 import org.tron.protos.contract.AssetIssueContractOuterClass;
@@ -111,9 +113,15 @@ public class UnfreezeAssetActuatorTest {
             StringUtil.hexString2ByteString(OWNER_ADDRESS),
             AccountType.Normal,
             initBalance);
-    ownerCapsule.setAssetIssuedName(assetName.getBytes());
-    ownerCapsule.setAssetIssuedID(assetIssueCapsule.createDbV2Key());
     dbManager.getAccountStore().put(ownerCapsule.createDbKey(), ownerCapsule);
+
+    AccountAssetIssueCapsule ownerAssetIssue = new AccountAssetIssueCapsule(
+            StringUtil.hexString2ByteString(OWNER_ADDRESS)
+    );
+    ownerAssetIssue.setAssetIssuedName(assetName.getBytes());
+    ownerAssetIssue.setAssetIssuedID(assetIssueCapsule.createDbV2Key());
+    dbManager.getAccountAssetIssueStore()
+            .put(ownerAssetIssue.createDbKey(), ownerAssetIssue);
   }
 
   private void createAssertSameTokenNameActive() {
@@ -124,7 +132,8 @@ public class UnfreezeAssetActuatorTest {
     builder.setName(ByteString.copyFromUtf8(assetName));
     builder.setId(String.valueOf(tokenId));
     AssetIssueCapsule assetIssueCapsule = new AssetIssueCapsule(builder.build());
-    dbManager.getAssetIssueV2Store().put(assetIssueCapsule.createDbV2Key(), assetIssueCapsule);
+    dbManager.getAssetIssueV2Store()
+            .put(assetIssueCapsule.createDbV2Key(), assetIssueCapsule);
 
     AccountCapsule ownerCapsule =
         new AccountCapsule(
@@ -132,9 +141,17 @@ public class UnfreezeAssetActuatorTest {
             StringUtil.hexString2ByteString(OWNER_ADDRESS),
             AccountType.Normal,
             initBalance);
-    ownerCapsule.setAssetIssuedName(assetName.getBytes());
-    ownerCapsule.setAssetIssuedID(assetIssueCapsule.createDbV2Key());
     dbManager.getAccountStore().put(ownerCapsule.createDbKey(), ownerCapsule);
+
+    AccountAssetIssueCapsule ownerAssetIssue = new AccountAssetIssueCapsule(
+            ByteString.copyFromUtf8("owner"),
+            StringUtil.hexString2ByteString(OWNER_ADDRESS)
+    );
+
+    ownerAssetIssue.setAssetIssuedName(assetName.getBytes());
+    ownerAssetIssue.setAssetIssuedID(assetIssueCapsule.createDbV2Key());
+    dbManager.getAccountAssetIssueStore()
+            .put(ownerAssetIssue.createDbKey(), ownerAssetIssue);
   }
 
   /**
@@ -146,9 +163,114 @@ public class UnfreezeAssetActuatorTest {
     long tokenId = dbManager.getDynamicPropertiesStore().getTokenIdNum();
     long now = System.currentTimeMillis();
     dbManager.getDynamicPropertiesStore().saveLatestBlockHeaderTimestamp(now);
-    AccountCapsule ownerAccount = dbManager.getAccountStore()
-            .get(ByteArray.fromHexString(OWNER_ADDRESS));
-    Account account = ownerAccount
+
+    Account account = dbManager.getAccountStore().get(ByteArray.fromHexString(OWNER_ADDRESS))
+        .getInstance();
+    Frozen newFrozen0 = Frozen.newBuilder()
+        .setFrozenBalance(frozenBalance)
+        .setExpireTime(now)
+        .build();
+    Frozen newFrozen1 = Frozen.newBuilder()
+        .setFrozenBalance(frozenBalance + 1)
+        .setExpireTime(now + 600000)
+        .build();
+    account = account.toBuilder()
+            .addFrozenSupply(newFrozen0).addFrozenSupply(newFrozen1).build();
+    AccountCapsule accountCapsule = new AccountCapsule(account);
+    dbManager.getAccountStore().put(accountCapsule.createDbKey(), accountCapsule);
+    UnfreezeAssetActuator actuator = new UnfreezeAssetActuator();
+    actuator.setChainBaseManager(dbManager.getChainBaseManager())
+        .setAny(getContract(OWNER_ADDRESS));
+
+    TransactionResultCapsule ret = new TransactionResultCapsule();
+    try {
+      actuator.validate();
+      actuator.execute(ret);
+      Assert.assertEquals(ret.getInstance().getRet(), code.SUCESS);
+      AccountCapsule owner = dbManager.getAccountStore()
+          .get(ByteArray.fromHexString(OWNER_ADDRESS));
+      AccountAssetIssueCapsule ownerAssetIssueCapsule =
+              dbManager.getAccountAssetIssueStore().get(ByteArray.fromHexString(OWNER_ADDRESS));
+      //V1
+      Assert.assertEquals(
+              ownerAssetIssueCapsule.getAssetMap()
+                      .get(assetName).longValue(), frozenBalance);
+      //V2
+      Assert.assertEquals(
+              ownerAssetIssueCapsule.getAssetMapV2()
+                      .get(String.valueOf(tokenId)).longValue(),
+          frozenBalance);
+      Assert.assertEquals(owner.getFrozenSupplyCount(), 1);
+    } catch (ContractValidateException e) {
+      Assert.assertFalse(e instanceof ContractValidateException);
+    } catch (ContractExeException e) {
+      Assert.assertFalse(e instanceof ContractExeException);
+    }
+  }
+
+  /**
+   * SameTokenName active, Unfreeze assert success.
+   */
+  @Test
+  public void SameTokenNameActiveUnfreezeAsset() {
+    createAssertSameTokenNameActive();
+    long tokenId = dbManager.getDynamicPropertiesStore().getTokenIdNum();
+    long now = System.currentTimeMillis();
+    dbManager.getDynamicPropertiesStore().saveLatestBlockHeaderTimestamp(now);
+
+    Account account = dbManager.getAccountStore().get(ByteArray.fromHexString(OWNER_ADDRESS))
+        .getInstance();
+    Frozen newFrozen0 = Frozen.newBuilder()
+        .setFrozenBalance(frozenBalance)
+        .setExpireTime(now)
+        .build();
+    Frozen newFrozen1 = Frozen.newBuilder()
+        .setFrozenBalance(frozenBalance + 1)
+        .setExpireTime(now + 600000)
+        .build();
+    account = account.toBuilder().addFrozenSupply(newFrozen0).addFrozenSupply(newFrozen1).build();
+    AccountCapsule accountCapsule = new AccountCapsule(account);
+    dbManager.getAccountStore().put(accountCapsule.createDbKey(), accountCapsule);
+    UnfreezeAssetActuator actuator = new UnfreezeAssetActuator();
+    actuator.setChainBaseManager(dbManager.getChainBaseManager())
+        .setAny(getContract(OWNER_ADDRESS));
+    TransactionResultCapsule ret = new TransactionResultCapsule();
+    try {
+      actuator.validate();
+      actuator.execute(ret);
+      Assert.assertEquals(ret.getInstance().getRet(), code.SUCESS);
+      AccountCapsule owner = dbManager.getAccountStore()
+          .get(ByteArray.fromHexString(OWNER_ADDRESS));
+
+      AccountAssetIssueCapsule ownerAccountAssetIssue = dbManager.getAccountAssetIssueStore()
+              .get(ByteArray.fromHexString(OWNER_ADDRESS));
+      //V1 assert not exist
+      Assert.assertNull(ownerAccountAssetIssue.getAssetMap().get(assetName));
+      //V2
+      Assert.assertEquals(
+              ownerAccountAssetIssue.getAssetMapV2().get(String.valueOf(tokenId)).longValue(),
+          frozenBalance);
+      Assert.assertEquals(owner.getFrozenSupplyCount(), 1);
+    } catch (ContractValidateException e) {
+      Assert.assertFalse(e instanceof ContractValidateException);
+    } catch (ContractExeException e) {
+      Assert.assertFalse(e instanceof ContractExeException);
+    }
+  }
+
+
+  /**
+   * when init data, SameTokenName is close, then open SameTokenName, Unfreeze assert success.
+   */
+  @Test
+  public void SameTokenNameActiveInitAndAcitveUnfreezeAsset() {
+    createAssertBeforSameTokenNameActive();
+    dbManager.getDynamicPropertiesStore().saveAllowSameTokenName(1);
+    long tokenId = dbManager.getDynamicPropertiesStore().getTokenIdNum();
+    long now = System.currentTimeMillis();
+    dbManager.getDynamicPropertiesStore().saveLatestBlockHeaderTimestamp(now);
+
+    Account account = dbManager.getAccountStore().get(ByteArray.fromHexString(OWNER_ADDRESS))
         .getInstance();
     Frozen newFrozen0 = Frozen.newBuilder()
         .setFrozenBalance(frozenBalance)
@@ -172,108 +294,13 @@ public class UnfreezeAssetActuatorTest {
       Assert.assertEquals(ret.getInstance().getRet(), code.SUCESS);
       AccountCapsule owner = dbManager.getAccountStore()
           .get(ByteArray.fromHexString(OWNER_ADDRESS));
-      //V1
-      Assert.assertEquals(owner.getAssetMapForTest().get(assetName).longValue(), frozenBalance);
-      //V2
-      Assert.assertEquals(owner.getAssetV2MapForTest().get(String.valueOf(tokenId)).longValue(),
-          frozenBalance);
-      Assert.assertEquals(owner.getFrozenSupplyCount(), 1);
-    } catch (ContractValidateException e) {
-      Assert.assertFalse(e instanceof ContractValidateException);
-    } catch (ContractExeException e) {
-      Assert.assertFalse(e instanceof ContractExeException);
-    }
-  }
 
-  /**
-   * SameTokenName active, Unfreeze assert success.
-   */
-  @Test
-  public void SameTokenNameActiveUnfreezeAsset() {
-    createAssertSameTokenNameActive();
-    long tokenId = dbManager.getDynamicPropertiesStore().getTokenIdNum();
-    long now = System.currentTimeMillis();
-    dbManager.getDynamicPropertiesStore().saveLatestBlockHeaderTimestamp(now);
-
-    AccountCapsule ownerAccount = dbManager.getAccountStore()
-            .get(ByteArray.fromHexString(OWNER_ADDRESS));
-    Account account = ownerAccount.getInstance();
-    Frozen newFrozen0 = Frozen.newBuilder()
-        .setFrozenBalance(frozenBalance)
-        .setExpireTime(now)
-        .build();
-    Frozen newFrozen1 = Frozen.newBuilder()
-        .setFrozenBalance(frozenBalance + 1)
-        .setExpireTime(now + 600000)
-        .build();
-    account = account.toBuilder().addFrozenSupply(newFrozen0).addFrozenSupply(newFrozen1).build();
-    AccountCapsule accountCapsule = new AccountCapsule(account);
-    dbManager.getAccountStore().put(accountCapsule.createDbKey(), accountCapsule);
-    UnfreezeAssetActuator actuator = new UnfreezeAssetActuator();
-    actuator.setChainBaseManager(dbManager.getChainBaseManager())
-        .setAny(getContract(OWNER_ADDRESS));
-    TransactionResultCapsule ret = new TransactionResultCapsule();
-    try {
-      actuator.validate();
-      actuator.execute(ret);
-      Assert.assertEquals(ret.getInstance().getRet(), code.SUCESS);
-      AccountCapsule owner = dbManager.getAccountStore()
-          .get(ByteArray.fromHexString(OWNER_ADDRESS));
+      AccountAssetIssueCapsule ownerAssetIssue = dbManager.getAccountAssetIssueStore()
+              .get(ByteArray.fromHexString(OWNER_ADDRESS));
       //V1 assert not exist
-      Assert.assertNull(owner.getAssetMapForTest().get(assetName));
+      Assert.assertNull(ownerAssetIssue.getAssetMap().get(assetName));
       //V2
-      Assert.assertEquals(owner.getAssetV2MapForTest().get(String.valueOf(tokenId)).longValue(),
-          frozenBalance);
-      Assert.assertEquals(owner.getFrozenSupplyCount(), 1);
-    } catch (ContractValidateException e) {
-      Assert.assertFalse(e instanceof ContractValidateException);
-    } catch (ContractExeException e) {
-      Assert.assertFalse(e instanceof ContractExeException);
-    }
-  }
-
-
-  /**
-   * when init data, SameTokenName is close, then open SameTokenName, Unfreeze assert success.
-   */
-  @Test
-  public void SameTokenNameActiveInitAndAcitveUnfreezeAsset() {
-    createAssertBeforSameTokenNameActive();
-    dbManager.getDynamicPropertiesStore().saveAllowSameTokenName(1);
-    long tokenId = dbManager.getDynamicPropertiesStore().getTokenIdNum();
-    long now = System.currentTimeMillis();
-    dbManager.getDynamicPropertiesStore().saveLatestBlockHeaderTimestamp(now);
-
-    AccountCapsule ownerAccount = dbManager.getAccountStore()
-            .get(ByteArray.fromHexString(OWNER_ADDRESS));
-    Account account = ownerAccount
-            .getInstance();
-    Frozen newFrozen0 = Frozen.newBuilder()
-        .setFrozenBalance(frozenBalance)
-        .setExpireTime(now)
-        .build();
-    Frozen newFrozen1 = Frozen.newBuilder()
-        .setFrozenBalance(frozenBalance + 1)
-        .setExpireTime(now + 600000)
-        .build();
-    account = account.toBuilder().addFrozenSupply(newFrozen0).addFrozenSupply(newFrozen1).build();
-    AccountCapsule accountCapsule = new AccountCapsule(account);
-    dbManager.getAccountStore().put(accountCapsule.createDbKey(), accountCapsule);
-    UnfreezeAssetActuator actuator = new UnfreezeAssetActuator();
-    actuator.setChainBaseManager(dbManager.getChainBaseManager())
-        .setAny(getContract(OWNER_ADDRESS));
-
-    TransactionResultCapsule ret = new TransactionResultCapsule();
-    try {
-      actuator.validate();
-      actuator.execute(ret);
-      Assert.assertEquals(ret.getInstance().getRet(), code.SUCESS);
-      AccountCapsule owner = dbManager.getAccountStore()
-          .get(ByteArray.fromHexString(OWNER_ADDRESS));
-      //V1 assert not exist
-      Assert.assertNull(owner.getAssetMapForTest().get(assetName));
-      //V2
-      Assert.assertEquals(owner.getAssetV2MapForTest().get(String.valueOf(tokenId)).longValue(),
+      Assert.assertEquals(ownerAssetIssue.getAssetMapV2().get(String.valueOf(tokenId)).longValue(),
           frozenBalance);
       Assert.assertEquals(owner.getFrozenSupplyCount(), 1);
     } catch (ContractValidateException e) {
@@ -336,10 +363,21 @@ public class UnfreezeAssetActuatorTest {
         .setFrozenBalance(frozenBalance)
         .setExpireTime(now)
         .build();
-    account = account.toBuilder().addFrozenSupply(newFrozen).setAssetIssuedName(ByteString.EMPTY)
+    account = account.toBuilder().addFrozenSupply(newFrozen)
         .build();
     AccountCapsule accountCapsule = new AccountCapsule(account);
     dbManager.getAccountStore().put(accountCapsule.createDbKey(), accountCapsule);
+
+    AccountAssetIssue accountAssetIssue = dbManager.getAccountAssetIssueStore()
+            .get(ByteArray.fromHexString(OWNER_ADDRESS)).getInstance();
+    accountAssetIssue =
+            accountAssetIssue.toBuilder().setAssetIssuedName(ByteString.EMPTY)
+            .build();
+    AccountAssetIssueCapsule accountAssetIssueCapsule =
+            new AccountAssetIssueCapsule(accountAssetIssue);
+    dbManager.getAccountAssetIssueStore()
+            .put(accountAssetIssueCapsule.createDbKey(), accountAssetIssueCapsule);
+
     UnfreezeAssetActuator actuator = new UnfreezeAssetActuator();
     actuator.setChainBaseManager(dbManager.getChainBaseManager())
         .setAny(getContract(OWNER_ADDRESS));
@@ -383,10 +421,8 @@ public class UnfreezeAssetActuatorTest {
     long now = System.currentTimeMillis();
     dbManager.getDynamicPropertiesStore().saveLatestBlockHeaderTimestamp(now);
 
-    AccountCapsule ownerAccount = dbManager.getAccountStore()
-            .get(ByteArray.fromHexString(OWNER_ADDRESS));
-
-    Account account = ownerAccount.getInstance();
+    Account account = dbManager.getAccountStore().get(ByteArray.fromHexString(OWNER_ADDRESS))
+        .getInstance();
     Frozen newFrozen = Frozen.newBuilder()
         .setFrozenBalance(frozenBalance)
         .setExpireTime(now + 60000)

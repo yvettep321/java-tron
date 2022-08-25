@@ -22,7 +22,6 @@ import org.tron.common.zksnark.JLibrustzcash;
 import org.tron.common.zksnark.LibrustzcashParam.InitZksnarkParams;
 import org.tron.core.config.args.Args;
 import org.tron.core.exception.ZksnarkException;
-import org.tron.core.services.filter.HttpApiAccessFilter;
 import org.tron.core.services.filter.HttpInterceptor;
 import org.tron.core.services.filter.LiteFnQueryHttpFilter;
 
@@ -280,19 +279,11 @@ public class FullNodeHttpApiService implements Service {
   @Autowired
   private LiteFnQueryHttpFilter liteFnQueryHttpFilter;
   @Autowired
-  private HttpApiAccessFilter httpApiAccessFilter;
-  @Autowired
   private GetTransactionFromPendingServlet getTransactionFromPendingServlet;
   @Autowired
   private GetTransactionListFromPendingServlet getTransactionListFromPendingServlet;
   @Autowired
   private GetPendingSizeServlet getPendingSizeServlet;
-  @Autowired
-  private GetEnergyPricesServlet getEnergyPricesServlet;
-  @Autowired
-  private GetBandwidthPricesServlet getBandwidthPricesServlet;
-  @Autowired
-  private GetBlockServlet getBlockServlet;
 
   private static String getParamsFile(String fileName) {
     InputStream in = Thread.currentThread().getContextClassLoader()
@@ -488,6 +479,7 @@ public class FullNodeHttpApiService implements Service {
       //          "/wallet/createshieldnullifier");
       //      context.addServlet(new ServletHolder(getShieldTransactionHashServlet),
       //      "/wallet/getshieldtransactionhash");
+
       context
           .addServlet(new ServletHolder(isShieldedTRC20ContractNoteSpentServlet),
               "/wallet/isshieldedtrc20contractnotespent");
@@ -533,14 +525,10 @@ public class FullNodeHttpApiService implements Service {
           "/wallet/getblockbalance");
       context.addServlet(new ServletHolder(getBurnTrxServlet), "/wallet/getburntrx");
       context.addServlet(new ServletHolder(getTransactionFromPendingServlet),
-          "/wallet/gettransactionfrompending");
+              "/wallet/gettransactionfrompending");
       context.addServlet(new ServletHolder(getTransactionListFromPendingServlet),
-          "/wallet/gettransactionlistfrompending");
+              "/wallet/gettransactionlistfrompending");
       context.addServlet(new ServletHolder(getPendingSizeServlet), "/wallet/getpendingsize");
-      context.addServlet(new ServletHolder(getEnergyPricesServlet), "/wallet/getenergyprices");
-      context.addServlet(new ServletHolder(getBandwidthPricesServlet),
-          "/wallet/getbandwidthprices");
-      context.addServlet(new ServletHolder(getBlockServlet), "/wallet/getblock");
 
       int maxHttpConnectNumber = Args.getInstance().getMaxHttpConnectNumber();
       if (maxHttpConnectNumber > 0) {
@@ -552,17 +540,7 @@ public class FullNodeHttpApiService implements Service {
       context.addFilter(new FilterHolder(liteFnQueryHttpFilter), "/*",
           EnumSet.allOf(DispatcherType.class));
 
-      // http access filter, it should have higher priority than HttpInterceptor
-      context.addFilter(new FilterHolder(httpApiAccessFilter), "/*",
-          EnumSet.allOf(DispatcherType.class));
-      // note: if the pathSpec of servlet is not started with wallet, it should be included here
-      context.getServletHandler().getFilterMappings()[1]
-          .setPathSpecs(new String[] {"/wallet/*",
-              "/net/listnodes",
-              "/monitor/getstatsinfo",
-              "/monitor/getnodeinfo"});
-
-      // metrics filter
+      // filter
       ServletHandler handler = new ServletHandler();
       FilterHolder fh = handler
           .addFilterWithMapping((Class<? extends Filter>) HttpInterceptor.class, "/*",

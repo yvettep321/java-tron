@@ -1,3 +1,20 @@
+/*
+ * Copyright (c) [2016] [ <ether.camp> ]
+ * This file is part of the ethereumJ library.
+ *
+ * The ethereumJ library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * The ethereumJ library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with the ethereumJ library. If not, see <http://www.gnu.org/licenses/>.
+ */
 package org.tron.core.vm;
 
 import static java.lang.String.format;
@@ -20,10 +37,12 @@ import org.tron.common.utils.ByteArray;
 import org.tron.common.utils.ByteUtil;
 import org.tron.common.utils.Commons;
 import org.tron.common.utils.DecodeUtil;
+import org.tron.core.capsule.AccountAssetIssueCapsule;
 import org.tron.core.capsule.AccountCapsule;
 import org.tron.core.exception.ContractValidateException;
 import org.tron.core.vm.config.VMConfig;
 import org.tron.core.vm.repository.Repository;
+
 
 @Slf4j(topic = "VM")
 public final class VMUtils {
@@ -196,7 +215,7 @@ public final class VMUtils {
       throw new ContractValidateException("Cannot transfer asset to yourself.");
     }
 
-    AccountCapsule ownerAccount = deposit.getAccount(ownerAddress);
+    AccountAssetIssueCapsule ownerAccount = deposit.getAccountAssetIssue(ownerAddress);
     if (ownerAccount == null) {
       throw new ContractValidateException("No owner account!");
     }
@@ -210,8 +229,17 @@ public final class VMUtils {
       throw new ContractValidateException("No asset !");
     }
 
-    Long assetBalance = ownerAccount.getAsset(deposit.getDynamicPropertiesStore(),
-            ByteArray.toStr(tokenIdWithoutLeadingZero));
+    Map<String, Long> asset;
+    if (deposit.getDynamicPropertiesStore().getAllowSameTokenName() == 0) {
+      asset = ownerAccount.getAssetMap();
+    } else {
+      asset = ownerAccount.getAssetMapV2();
+    }
+    if (asset.isEmpty()) {
+      throw new ContractValidateException("Owner no asset!");
+    }
+
+    Long assetBalance = asset.get(ByteArray.toStr(tokenIdWithoutLeadingZero));
     if (null == assetBalance || assetBalance <= 0) {
       throw new ContractValidateException("assetBalance must greater than 0.");
     }
@@ -219,10 +247,13 @@ public final class VMUtils {
       throw new ContractValidateException("assetBalance is not sufficient.");
     }
 
-    AccountCapsule toAccount = deposit.getAccount(toAddress);
-    if (toAccount != null) {
-      assetBalance = toAccount.getAsset(deposit.getDynamicPropertiesStore(),
-              ByteArray.toStr(tokenIdWithoutLeadingZero));
+    AccountAssetIssueCapsule toAccountAssetIssueCapsule = deposit.getAccountAssetIssue(toAddress);
+    if (toAccountAssetIssueCapsule != null) {
+      if (deposit.getDynamicPropertiesStore().getAllowSameTokenName() == 0) {
+        assetBalance = toAccountAssetIssueCapsule.getAssetMap().get(ByteArray.toStr(tokenIdWithoutLeadingZero));
+      } else {
+        assetBalance = toAccountAssetIssueCapsule.getAssetMapV2().get(ByteArray.toStr(tokenIdWithoutLeadingZero));
+      }
       if (assetBalance != null) {
         try {
           assetBalance = Math.addExact(assetBalance, amount); //check if overflow

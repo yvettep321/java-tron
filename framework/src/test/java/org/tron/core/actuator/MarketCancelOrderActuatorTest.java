@@ -18,6 +18,7 @@ import org.tron.common.utils.FileUtil;
 import org.tron.core.ChainBaseManager;
 import org.tron.core.Constant;
 import org.tron.core.Wallet;
+import org.tron.core.capsule.AccountAssetIssueCapsule;
 import org.tron.core.capsule.AccountCapsule;
 import org.tron.core.capsule.AssetIssueCapsule;
 import org.tron.core.capsule.MarketAccountOrderCapsule;
@@ -31,6 +32,7 @@ import org.tron.core.db.Manager;
 import org.tron.core.exception.ContractExeException;
 import org.tron.core.exception.ContractValidateException;
 import org.tron.core.exception.ItemNotFoundException;
+import org.tron.core.store.AccountAssetIssueStore;
 import org.tron.core.store.AccountStore;
 import org.tron.core.store.MarketAccountStore;
 import org.tron.core.store.MarketOrderStore;
@@ -124,6 +126,22 @@ public class MarketCancelOrderActuatorTest {
         .put(ownerAccountFirstCapsule.getAddress().toByteArray(), ownerAccountFirstCapsule);
     dbManager.getAccountStore()
         .put(ownerAccountSecondCapsule.getAddress().toByteArray(), ownerAccountSecondCapsule);
+
+    AccountAssetIssueCapsule ownerAccountAssetIssueFirstCapsule =
+            new AccountAssetIssueCapsule(
+                    ByteString.copyFromUtf8(ACCOUNT_NAME_FIRST),
+                    ByteString.copyFrom(ownerAddressFirstBytes)
+                );
+    AccountAssetIssueCapsule ownerAccountAssetIssueSecondCapsule =
+            new AccountAssetIssueCapsule(
+                    ByteString.copyFromUtf8(ACCOUNT_NAME_SECOND),
+                    ByteString.copyFrom(ownerAddressSecondBytes));
+    dbManager.getAccountAssetIssueStore()
+            .put(ownerAccountAssetIssueFirstCapsule.getAddress().toByteArray(),
+                    ownerAccountAssetIssueFirstCapsule);
+    dbManager.getAccountAssetIssueStore()
+            .put(ownerAccountAssetIssueSecondCapsule.getAddress().toByteArray(),
+                    ownerAccountAssetIssueSecondCapsule);
 
     // clean
     cleanMarketOrderByAccount(ownerAddressFirstBytes);
@@ -430,9 +448,14 @@ public class MarketCancelOrderActuatorTest {
 
     byte[] ownerAddress = ByteArray.fromHexString(ownAddress);
     AccountCapsule accountCapsule = dbManager.getAccountStore().get(ownerAddress);
-    accountCapsule.addAssetAmountV2(sellTokenId.getBytes(), sellTokenQuant,
-        dbManager.getDynamicPropertiesStore(), dbManager.getAssetIssueStore());
+
     dbManager.getAccountStore().put(ownerAddress, accountCapsule);
+
+    AccountAssetIssueCapsule accountAssetIssueCapsule =
+            dbManager.getAccountAssetIssueStore().get(ownerAddress);
+    accountAssetIssueCapsule.addAssetAmountV2(sellTokenId.getBytes(), sellTokenQuant,
+            dbManager.getDynamicPropertiesStore(), dbManager.getAssetIssueStore());
+    dbManager.getAccountAssetIssueStore().put(ownerAddress, accountAssetIssueCapsule);
 
     // do process
     MarketSellAssetActuator actuator = new MarketSellAssetActuator();
@@ -465,6 +488,7 @@ public class MarketCancelOrderActuatorTest {
     MarketPairPriceToOrderStore pairPriceToOrderStore = chainBaseManager
         .getMarketPairPriceToOrderStore();
     AccountStore accountStore = dbManager.getAccountStore();
+    AccountAssetIssueStore accountAssetIssueStore = dbManager.getAccountAssetIssueStore();
 
     addOrder(TOKEN_ID_ONE, 100L, TOKEN_ID_TWO,
         200L, OWNER_ADDRESS_FIRST);
@@ -499,11 +523,15 @@ public class MarketCancelOrderActuatorTest {
     accountCapsule = accountStore
         .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
 
+    AccountAssetIssueCapsule accountAssetIssueCapsule = accountAssetIssueStore
+            .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
+
     Assert.assertEquals(balanceBefore,
         dbManager.getDynamicPropertiesStore().getMarketCancelFee() + accountCapsule.getBalance());
 
     //check token number return
-    Assert.assertEquals(100L,accountCapsule.getAssetV2MapForTest().get(TOKEN_ID_ONE).longValue());
+    Assert.assertEquals(100L,
+            accountAssetIssueCapsule.getAssetMapV2().get(TOKEN_ID_ONE).longValue());
 
     //check accountOrder
     accountOrderCapsule = marketAccountStore.get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
@@ -646,6 +674,7 @@ public class MarketCancelOrderActuatorTest {
     //get storeDb
     ChainBaseManager chainBaseManager = dbManager.getChainBaseManager();
     AccountStore accountStore = chainBaseManager.getAccountStore();
+    AccountAssetIssueStore accountAssetIssueStore = chainBaseManager.getAccountAssetIssueStore();
     MarketAccountStore marketAccountStore = chainBaseManager.getMarketAccountStore();
     MarketOrderStore orderStore = chainBaseManager.getMarketOrderStore();
     MarketPairToPriceStore pairToPriceStore = chainBaseManager.getMarketPairToPriceStore();
@@ -664,6 +693,9 @@ public class MarketCancelOrderActuatorTest {
         .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
     long balanceBefore = accountCapsule.getBalance();
 
+    AccountAssetIssueCapsule accountAssetIssueCapsule = accountAssetIssueStore
+            .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
+
     MarketAccountOrderCapsule accountOrderCapsule = marketAccountStore
         .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
     ByteString orderId = accountOrderCapsule.getOrdersList().get(1);
@@ -674,13 +706,16 @@ public class MarketCancelOrderActuatorTest {
     //check fee
     accountCapsule = accountStore
         .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
+    accountAssetIssueCapsule = accountAssetIssueStore
+            .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
 
     Assert.assertEquals(
         balanceBefore - dbManager.getDynamicPropertiesStore().getMarketCancelFee(),
         +accountCapsule.getBalance());
 
     //check token number return
-    Assert.assertEquals(100L, accountCapsule.getAssetV2MapForTest().get(TOKEN_ID_ONE).longValue());
+    Assert.assertEquals(100L,
+            accountAssetIssueCapsule.getAssetMapV2().get(TOKEN_ID_ONE).longValue());
 
     //check accountOrder
     accountOrderCapsule = marketAccountStore.get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
@@ -734,6 +769,7 @@ public class MarketCancelOrderActuatorTest {
     //get storeDb
     ChainBaseManager chainBaseManager = dbManager.getChainBaseManager();
     AccountStore accountStore = dbManager.getAccountStore();
+    AccountAssetIssueStore accountAssetIssueStore = dbManager.getAccountAssetIssueStore();
     MarketAccountStore marketAccountStore = chainBaseManager.getMarketAccountStore();
     MarketOrderStore orderStore = chainBaseManager.getMarketOrderStore();
     MarketPairToPriceStore pairToPriceStore = chainBaseManager.getMarketPairToPriceStore();
@@ -748,6 +784,9 @@ public class MarketCancelOrderActuatorTest {
         .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
     long balanceBefore = accountCapsule.getBalance();
 
+    AccountAssetIssueCapsule accountAssetIssueCapsule = accountAssetIssueStore
+            .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
+
     MarketAccountOrderCapsule accountOrderCapsule = marketAccountStore
         .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
     ByteString orderId = accountOrderCapsule.getOrdersList().get(0);
@@ -758,13 +797,16 @@ public class MarketCancelOrderActuatorTest {
     //check balance
     accountCapsule = accountStore
         .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
+    accountAssetIssueCapsule = accountAssetIssueStore
+            .get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));
 
     Assert.assertEquals(
         balanceBefore - dbManager.getDynamicPropertiesStore().getMarketCancelFee(),
         +accountCapsule.getBalance());
 
     //check token number return
-    Assert.assertEquals(100L,accountCapsule.getAssetV2MapForTest().get(TOKEN_ID_ONE).longValue());
+    Assert.assertEquals(100L,
+            accountAssetIssueCapsule.getAssetMapV2().get(TOKEN_ID_ONE).longValue());
 
     //check accountOrder
     accountOrderCapsule = marketAccountStore.get(ByteArray.fromHexString(OWNER_ADDRESS_FIRST));

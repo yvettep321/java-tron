@@ -56,6 +56,8 @@ public class TransactionTrace {
 
   private AccountStore accountStore;
 
+  private AccountAssetIssueStore accountAssetIssueStore;
+
   private CodeStore codeStore;
 
   private AbiStore abiStore;
@@ -63,8 +65,6 @@ public class TransactionTrace {
   private EnergyProcessor energyProcessor;
 
   private TrxType trxType;
-
-  private long txStartTimeInMs;
 
   private Runtime runtime;
 
@@ -100,6 +100,7 @@ public class TransactionTrace {
     this.codeStore = storeFactory.getChainBaseManager().getCodeStore();
     this.abiStore = storeFactory.getChainBaseManager().getAbiStore();
     this.accountStore = storeFactory.getChainBaseManager().getAccountStore();
+    this.accountAssetIssueStore = storeFactory.getChainBaseManager().getAccountAssetIssueStore();
 
     this.receipt = new ReceiptCapsule(Sha256Hash.ZERO_HASH);
     this.energyProcessor = new EnergyProcessor(dynamicPropertiesStore, accountStore);
@@ -123,7 +124,6 @@ public class TransactionTrace {
 
   //pre transaction check
   public void init(BlockCapsule blockCap, boolean eventPluginLoaded) {
-    txStartTimeInMs = System.currentTimeMillis();
     transactionContext = new TransactionContext(blockCap, trx, storeFactory, false,
         eventPluginLoaded);
   }
@@ -308,6 +308,7 @@ public class TransactionTrace {
     codeStore.delete(address);
     accountStore.delete(address);
     contractStore.delete(address);
+    accountAssetIssueStore.delete(address);
   }
 
   public static byte[] convertToTronAddress(byte[] address) {

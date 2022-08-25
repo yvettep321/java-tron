@@ -31,8 +31,10 @@ public class ProgramInvokeMockImpl implements ProgramInvoke {
   public ProgramInvokeMockImpl() {
     this.deposit = RepositoryImpl.createRoot(null);
     this.deposit.createAccount(ownerAddress, Protocol.AccountType.Normal);
+    this.deposit.createAccountAssetIssue(ownerAddress);
 
     this.deposit.createAccount(contractAddress, Protocol.AccountType.Contract);
+    this.deposit.createAccountAssetIssue(contractAddress);
     this.deposit.createContract(contractAddress,
         new ContractCapsule(SmartContract.newBuilder().setContractAddress(
             ByteString.copyFrom(contractAddress)).build()));

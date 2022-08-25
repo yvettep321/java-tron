@@ -8,8 +8,8 @@ import java.util.HashMap;
 import java.util.Optional;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.bouncycastle.util.Strings;
-import org.bouncycastle.util.encoders.Hex;
+import org.spongycastle.util.Strings;
+import org.spongycastle.util.encoders.Hex;
 import org.tron.common.crypto.Hash;
 import org.tron.common.parameter.CommonParameter;
 import org.tron.common.runtime.vm.DataWord;
@@ -20,15 +20,10 @@ import org.tron.common.utils.Sha256Hash;
 import org.tron.common.utils.StorageUtils;
 import org.tron.common.utils.StringUtil;
 import org.tron.core.ChainBaseManager;
-import org.tron.core.capsule.AbiCapsule;
-import org.tron.core.capsule.AccountCapsule;
-import org.tron.core.capsule.AssetIssueCapsule;
-import org.tron.core.capsule.BlockCapsule;
+import org.tron.core.capsule.*;
 import org.tron.core.capsule.BlockCapsule.BlockId;
 import org.tron.core.capsule.BytesCapsule;
-import org.tron.core.capsule.CodeCapsule;
 import org.tron.core.capsule.ContractCapsule;
-import org.tron.core.capsule.DelegatedResourceCapsule;
 import org.tron.core.capsule.VotesCapsule;
 import org.tron.core.capsule.WitnessCapsule;
 import org.tron.core.config.Parameter;
@@ -39,16 +34,16 @@ import org.tron.core.db.TransactionTrace;
 import org.tron.core.exception.BadItemException;
 import org.tron.core.exception.ItemNotFoundException;
 import org.tron.core.exception.StoreException;
-import org.tron.core.store.AbiStore;
+import org.tron.core.service.MortgageService;
 import org.tron.core.store.AccountStore;
 import org.tron.core.store.AssetIssueStore;
 import org.tron.core.store.AssetIssueV2Store;
 import org.tron.core.store.CodeStore;
 import org.tron.core.store.ContractStore;
-import org.tron.core.store.DelegatedResourceStore;
 import org.tron.core.store.DelegationStore;
 import org.tron.core.store.DynamicPropertiesStore;
 import org.tron.core.store.StorageRowStore;
+import org.tron.core.store.AccountAssetIssueStore;
 import org.tron.core.store.StoreFactory;
 import org.tron.core.store.VotesStore;
 import org.tron.core.store.WitnessStore;
@@ -56,21 +51,16 @@ import org.tron.core.vm.config.VMConfig;
 import org.tron.core.vm.program.Program.IllegalOperationException;
 import org.tron.core.vm.program.Storage;
 import org.tron.protos.Protocol;
-import org.tron.protos.Protocol.Account;
 import org.tron.protos.Protocol.AccountType;
-import org.tron.protos.Protocol.DelegatedResource;
-import org.tron.protos.Protocol.Votes;
-import org.tron.protos.contract.AssetIssueContractOuterClass.AssetIssueContract;
-import org.tron.protos.contract.SmartContractOuterClass.SmartContract;
 
 @Slf4j(topic = "Repository")
 public class RepositoryImpl implements Repository {
 
-  private final long precision = Parameter.ChainConstant.PRECISION;
-  private final long windowSize = Parameter.ChainConstant.WINDOW_SIZE_MS
-      / BLOCK_PRODUCED_INTERVAL;
+  //for energycal
+  private long precision = Parameter.ChainConstant.PRECISION;
+  private long windowSize = Parameter.ChainConstant.WINDOW_SIZE_MS /
+      BLOCK_PRODUCED_INTERVAL;
   private static final byte[] TOTAL_NET_WEIGHT = "TOTAL_NET_WEIGHT".getBytes();
-  private static final byte[] TOTAL_ENERGY_WEIGHT = "TOTAL_ENERGY_WEIGHT".getBytes();
 
   private StoreFactory storeFactory;
   @Getter
@@ -78,11 +68,11 @@ public class RepositoryImpl implements Repository {
   @Getter
   private AccountStore accountStore;
   @Getter
+  private AccountAssetIssueStore accountAssetIssueStore;
+  @Getter
   private AssetIssueStore assetIssueStore;
   @Getter
   private AssetIssueV2Store assetIssueV2Store;
-  @Getter
-  private AbiStore abiStore;
   @Getter
   private CodeStore codeStore;
   @Getter
@@ -98,27 +88,24 @@ public class RepositoryImpl implements Repository {
   @Getter
   private WitnessStore witnessStore;
   @Getter
-  private DelegatedResourceStore delegatedResourceStore;
-  @Getter
   private VotesStore votesStore;
+  @Getter
+  private MortgageService mortgageService;
   @Getter
   private DelegationStore delegationStore;
 
   private Repository parent = null;
 
-  private final HashMap<Key, Value<Account>> accountCache = new HashMap<>();
-  private final HashMap<Key, Value<byte[]>> codeCache = new HashMap<>();
-  private final HashMap<Key, Value<SmartContract>> contractCache = new HashMap<>();
-  private final HashMap<Key, Storage> storageCache = new HashMap<>();
+  private HashMap<Key, Value> accountCache = new HashMap<>();
+  private HashMap<Key, Value> accountAssetIssueCache = new HashMap<>();
+  private HashMap<Key, Value> codeCache = new HashMap<>();
+  private HashMap<Key, Value> contractCache = new HashMap<>();
+  private HashMap<Key, Value> dynamicPropertiesCache = new HashMap<>();
+  private HashMap<Key, Storage> storageCache = new HashMap<>();
 
-  private final HashMap<Key, Value<AssetIssueContract>> assetIssueCache = new HashMap<>();
-  private final HashMap<Key, Value<byte[]>> dynamicPropertiesCache = new HashMap<>();
-  private final HashMap<Key, Value<DelegatedResource>> delegatedResourceCache = new HashMap<>();
-  private final HashMap<Key, Value<Votes>> votesCache = new HashMap<>();
-  private final HashMap<Key, Value<byte[]>> delegationCache = new HashMap<>();
-
-  public static void removeLruCache(byte[] address) {
-  }
+  private HashMap<Key, Value> assetIssueCache = new HashMap<>();
+  private HashMap<Key, Value> votesCache = new HashMap<>();
+  private HashMap<Key, Value> delegationCache = new HashMap<>();
 
   public RepositoryImpl(StoreFactory storeFactory, RepositoryImpl repository) {
     init(storeFactory, repository);
@@ -134,7 +121,7 @@ public class RepositoryImpl implements Repository {
       ChainBaseManager manager = storeFactory.getChainBaseManager();
       dynamicPropertiesStore = manager.getDynamicPropertiesStore();
       accountStore = manager.getAccountStore();
-      abiStore = manager.getAbiStore();
+      accountAssetIssueStore = manager.getAccountAssetIssueStore();
       codeStore = manager.getCodeStore();
       contractStore = manager.getContractStore();
       assetIssueStore = manager.getAssetIssueStore();
@@ -144,8 +131,8 @@ public class RepositoryImpl implements Repository {
       khaosDb = manager.getKhaosDb();
       blockIndexStore = manager.getBlockIndexStore();
       witnessStore = manager.getWitnessStore();
-      delegatedResourceStore = manager.getDelegatedResourceStore();
       votesStore = manager.getVotesStore();
+      mortgageService = manager.getMortgageService();
       delegationStore = manager.getDelegationStore();
     }
     this.parent = parent;
@@ -174,7 +161,7 @@ public class RepositoryImpl implements Repository {
     byte[] tokenIdWithoutLeadingZero = ByteUtil.stripLeadingZeroes(tokenId);
     Key key = Key.create(tokenIdWithoutLeadingZero);
     if (assetIssueCache.containsKey(key)) {
-      return new AssetIssueCapsule(assetIssueCache.get(key).getValue());
+      return assetIssueCache.get(key).getAssetIssue();
     }
 
     AssetIssueCapsule assetIssueCapsule;
@@ -186,7 +173,7 @@ public class RepositoryImpl implements Repository {
           .get(tokenIdWithoutLeadingZero);
     }
     if (assetIssueCapsule != null) {
-      assetIssueCache.put(key, Value.create(assetIssueCapsule));
+      assetIssueCache.put(key, Value.create(assetIssueCapsule.getData()));
     }
     return assetIssueCapsule;
   }
@@ -195,8 +182,16 @@ public class RepositoryImpl implements Repository {
   public AccountCapsule createAccount(byte[] address, Protocol.AccountType type) {
     Key key = new Key(address);
     AccountCapsule account = new AccountCapsule(ByteString.copyFrom(address), type);
-    accountCache.put(key, Value.create(account, Type.CREATE));
+    accountCache.put(key, new Value(account.getData(), Type.VALUE_TYPE_CREATE));
     return account;
+  }
+
+  @Override
+  public AccountAssetIssueCapsule createAccountAssetIssue(byte[] address) {
+    Key key = new Key(address);
+    AccountAssetIssueCapsule accountAssetIssueCapsule = new AccountAssetIssueCapsule(ByteString.copyFrom(address));
+    accountAssetIssueCache.put(key, new Value(accountAssetIssueCapsule.getData(), Type.VALUE_TYPE_CREATE));
+    return accountAssetIssueCapsule;
   }
 
   @Override
@@ -206,7 +201,8 @@ public class RepositoryImpl implements Repository {
     AccountCapsule account = new AccountCapsule(ByteString.copyFrom(address),
         ByteString.copyFromUtf8(accountName),
         type);
-    accountCache.put(key, Value.create(account, Type.CREATE));
+
+    accountCache.put(key, new Value(account.getData(), Type.VALUE_TYPE_CREATE));
     return account;
   }
 
@@ -214,7 +210,7 @@ public class RepositoryImpl implements Repository {
   public AccountCapsule getAccount(byte[] address) {
     Key key = new Key(address);
     if (accountCache.containsKey(key)) {
-      return new AccountCapsule(accountCache.get(key).getValue());
+      return accountCache.get(key).getAccount();
     }
 
     AccountCapsule accountCapsule;
@@ -225,21 +221,41 @@ public class RepositoryImpl implements Repository {
     }
 
     if (accountCapsule != null) {
-      accountCache.put(key, Value.create(accountCapsule));
+      accountCache.put(key, Value.create(accountCapsule.getData()));
     }
     return accountCapsule;
   }
 
   @Override
-  public BytesCapsule getDynamicProperty(byte[] word) {
+  public AccountAssetIssueCapsule getAccountAssetIssue(byte[] address) {
+    Key key = new Key(address);
+    if (accountAssetIssueCache.containsKey(key)) {
+      return accountAssetIssueCache.get(key).getAccountAssetIssue();
+    }
+
+    AccountAssetIssueCapsule accountAssetIssueCapsule;
+    if (parent != null) {
+      accountAssetIssueCapsule = parent.getAccountAssetIssue(address);
+    } else {
+      accountAssetIssueCapsule = getAccountAssetIssueStore().get(address);
+    }
+
+    if (accountAssetIssueCapsule != null) {
+      accountAssetIssueCache.put(key, Value.create(accountAssetIssueCapsule.getData()));
+    }
+    return accountAssetIssueCapsule;
+  }
+
+  @Override
+  public BytesCapsule getDynamic(byte[] word) {
     Key key = Key.create(word);
     if (dynamicPropertiesCache.containsKey(key)) {
-      return new BytesCapsule(dynamicPropertiesCache.get(key).getValue());
+      return dynamicPropertiesCache.get(key).getDynamicProperties();
     }
 
     BytesCapsule bytesCapsule;
     if (parent != null) {
-      bytesCapsule = parent.getDynamicProperty(word);
+      bytesCapsule = parent.getDynamic(word);
     } else {
       try {
         bytesCapsule = getDynamicPropertiesStore().get(word);
@@ -256,54 +272,34 @@ public class RepositoryImpl implements Repository {
   }
 
   @Override
-  public DelegatedResourceCapsule getDelegatedResource(byte[] key) {
-    Key cacheKey = new Key(key);
-    if (delegatedResourceCache.containsKey(cacheKey)) {
-      return new DelegatedResourceCapsule(delegatedResourceCache.get(cacheKey).getValue());
-    }
-
-    DelegatedResourceCapsule delegatedResourceCapsule;
-    if (parent != null) {
-      delegatedResourceCapsule = parent.getDelegatedResource(key);
-    } else {
-      delegatedResourceCapsule = getDelegatedResourceStore().get(key);
-    }
-
-    if (delegatedResourceCapsule != null) {
-      delegatedResourceCache.put(cacheKey, Value.create(delegatedResourceCapsule));
-    }
-    return delegatedResourceCapsule;
-  }
-
-  @Override
-  public VotesCapsule getVotes(byte[] address) {
+  public VotesCapsule getVotesCapsule(byte[] address) {
     Key cacheKey = new Key(address);
     if (votesCache.containsKey(cacheKey)) {
-      return new VotesCapsule(votesCache.get(cacheKey).getValue());
+      return votesCache.get(cacheKey).getVotes();
     }
 
     VotesCapsule votesCapsule;
     if (parent != null) {
-      votesCapsule = parent.getVotes(address);
+      votesCapsule = parent.getVotesCapsule(address);
     } else {
       votesCapsule = getVotesStore().get(address);
     }
 
     if (votesCapsule != null) {
-      votesCache.put(cacheKey, Value.create(votesCapsule));
+      votesCache.put(cacheKey, Value.create(votesCapsule.getData()));
     }
     return votesCapsule;
   }
 
   @Override
-  public WitnessCapsule getWitness(byte[] address) {
+  public WitnessCapsule getWitnessCapsule(byte[] address) {
     return witnessStore.get(address);
   }
 
   @Override
   public long getBeginCycle(byte[] address) {
     Key cacheKey = new Key(address);
-    BytesCapsule bytesCapsule = getDelegation(cacheKey);
+    BytesCapsule bytesCapsule = getDelegationCache(cacheKey);
     return bytesCapsule == null ? 0 : ByteArray.toLong(bytesCapsule.getData());
   }
 
@@ -311,7 +307,7 @@ public class RepositoryImpl implements Repository {
   public long getEndCycle(byte[] address) {
     byte[] key = ("end-" + Hex.toHexString(address)).getBytes();
     Key cacheKey = new Key(key);
-    BytesCapsule bytesCapsule = getDelegation(cacheKey);
+    BytesCapsule bytesCapsule = getDelegationCache(cacheKey);
     return bytesCapsule == null ? DelegationStore.REMARK : ByteArray.toLong(bytesCapsule.getData());
   }
 
@@ -319,7 +315,7 @@ public class RepositoryImpl implements Repository {
   public AccountCapsule getAccountVote(long cycle, byte[] address) {
     byte[] key = (cycle + "-" + Hex.toHexString(address) + "-account-vote").getBytes();
     Key cacheKey = new Key(key);
-    BytesCapsule bytesCapsule = getDelegation(cacheKey);
+    BytesCapsule bytesCapsule = getDelegationCache(cacheKey);
     if (bytesCapsule == null) {
       return null;
     } else {
@@ -328,13 +324,13 @@ public class RepositoryImpl implements Repository {
   }
 
   @Override
-  public BytesCapsule getDelegation(Key key) {
+  public BytesCapsule getDelegationCache(Key key) {
     if (delegationCache.containsKey(key)) {
-      return new BytesCapsule(delegationCache.get(key).getValue());
+      return delegationCache.get(key).getBytes();
     }
     BytesCapsule bytesCapsule;
     if (parent != null) {
-      bytesCapsule = parent.getDelegation(key);
+      bytesCapsule = parent.getDelegationCache(key);
     } else {
       bytesCapsule = getDelegationStore().get(key.getData());
     }
@@ -354,15 +350,16 @@ public class RepositoryImpl implements Repository {
 
   @Override
   public void createContract(byte[] address, ContractCapsule contractCapsule) {
-    contractCache.put(Key.create(address),
-        Value.create(contractCapsule, Type.CREATE));
+    Key key = Key.create(address);
+    Value value = Value.create(contractCapsule.getData(), Type.VALUE_TYPE_CREATE);
+    contractCache.put(key, value);
   }
 
   @Override
   public ContractCapsule getContract(byte[] address) {
     Key key = Key.create(address);
     if (contractCache.containsKey(key)) {
-      return new ContractCapsule(contractCache.get(key).getValue());
+      return contractCache.get(key).getContract();
     }
 
     ContractCapsule contractCapsule;
@@ -373,45 +370,50 @@ public class RepositoryImpl implements Repository {
     }
 
     if (contractCapsule != null) {
-      contractCache.put(key, Value.create(contractCapsule));
+      contractCache.put(key, Value.create(contractCapsule.getData()));
     }
     return contractCapsule;
   }
 
   @Override
   public void updateContract(byte[] address, ContractCapsule contractCapsule) {
-    contractCache.put(Key.create(address),
-        Value.create(contractCapsule, Type.DIRTY));
+    Key key = Key.create(address);
+    Value value = Value.create(contractCapsule.getData(), Type.VALUE_TYPE_DIRTY);
+    contractCache.put(key, value);
   }
 
   @Override
   public void updateAccount(byte[] address, AccountCapsule accountCapsule) {
-    accountCache.put(Key.create(address),
-        Value.create(accountCapsule, Type.DIRTY));
+    Key key = Key.create(address);
+    Value value = Value.create(accountCapsule.getData(), Type.VALUE_TYPE_DIRTY);
+    accountCache.put(key, value);
   }
 
   @Override
-  public void updateDynamicProperty(byte[] word, BytesCapsule bytesCapsule) {
-    dynamicPropertiesCache.put(Key.create(word),
-        Value.create(bytesCapsule.getData(), Type.DIRTY));
+  public void updateAccountAssetIssue(byte[] address, AccountAssetIssueCapsule accountAssetIssueCapsule) {
+    Key key = Key.create(address);
+    Value value = Value.create(accountAssetIssueCapsule.getData(), Type.VALUE_TYPE_DIRTY);
+    accountAssetIssueCache.put(key, value);
   }
 
   @Override
-  public void updateDelegatedResource(byte[] word,
-      DelegatedResourceCapsule delegatedResourceCapsule) {
-    delegatedResourceCache.put(Key.create(word),
-        Value.create(delegatedResourceCapsule, Type.DIRTY));
+  public void updateDynamic(byte[] word, BytesCapsule bytesCapsule) {
+    Key key = Key.create(word);
+    Value value = Value.create(bytesCapsule.getData(), Type.VALUE_TYPE_DIRTY);
+    dynamicPropertiesCache.put(key, value);
   }
 
   @Override
-  public void updateVotes(byte[] word, VotesCapsule votesCapsule) {
-    votesCache.put(Key.create(word),
-        Value.create(votesCapsule, Type.DIRTY));
+  public void updateVotesCapsule(byte[] word, VotesCapsule votesCapsule) {
+    Key key = Key.create(word);
+    Value value = Value.create(votesCapsule.getData(), Type.VALUE_TYPE_DIRTY);
+    votesCache.put(key, value);
   }
 
   @Override
   public void updateBeginCycle(byte[] word, long cycle) {
-    updateDelegation(word, new BytesCapsule(ByteArray.fromLong(cycle)));
+    BytesCapsule bytesCapsule = new BytesCapsule(ByteArray.fromLong(cycle));
+    updateDelegation(word, bytesCapsule);
   }
 
   @Override
@@ -429,14 +431,30 @@ public class RepositoryImpl implements Repository {
   }
 
   @Override
+  public void updateRemark(byte[] word, long cycle) {
+    BytesCapsule bytesCapsule = new BytesCapsule(ByteArray.fromLong(DelegationStore.REMARK));
+    byte[] key = (cycle + "-" + Hex.toHexString(word) + "-remark").getBytes();
+    updateDelegation(key, bytesCapsule);
+  }
+
+  @Override
   public void updateDelegation(byte[] word, BytesCapsule bytesCapsule) {
-    delegationCache.put(Key.create(word),
-        Value.create(bytesCapsule.getData(), Type.DIRTY));
+    Key key = Key.create(word);
+    Value value = Value.create(bytesCapsule.getData(), Type.VALUE_TYPE_DIRTY);
+    delegationCache.put(key, value);
+  }
+
+  @Override
+  public void updateLastWithdrawCycle(byte[] address, long cycle) {
+    BytesCapsule bytesCapsule = new BytesCapsule(ByteArray.fromLong(cycle));
+    updateDelegation(("lastWithdraw-" + Hex.toHexString(address)).getBytes(), bytesCapsule);
   }
 
   @Override
   public void saveCode(byte[] address, byte[] code) {
-    codeCache.put(Key.create(address), Value.create(code, Type.CREATE));
+    Key key = Key.create(address);
+    Value value = Value.create(code, Type.VALUE_TYPE_CREATE);
+    codeCache.put(key, value);
 
     if (VMConfig.allowTvmConstantinople()) {
       ContractCapsule contract = getContract(address);
@@ -450,7 +468,7 @@ public class RepositoryImpl implements Repository {
   public byte[] getCode(byte[] address) {
     Key key = Key.create(address);
     if (codeCache.containsKey(key)) {
-      return codeCache.get(key).getValue();
+      return codeCache.get(key).getCode().getData();
     }
 
     byte[] code;
@@ -471,19 +489,23 @@ public class RepositoryImpl implements Repository {
 
   @Override
   public void putStorageValue(byte[] address, DataWord key, DataWord value) {
-    Storage storage = getStorageInternal(address);
-    if (storage != null) {
-      storage.put(key, value);
+    address = TransactionTrace.convertToTronAddress(address);
+    if (getAccount(address) == null) {
+      return;
     }
+    Key addressKey = Key.create(address);
+    Storage storage;
+    if (storageCache.containsKey(addressKey)) {
+      storage = storageCache.get(addressKey);
+    } else {
+      storage = getStorage(address);
+      storageCache.put(addressKey, storage);
+    }
+    storage.put(key, value);
   }
 
   @Override
   public DataWord getStorageValue(byte[] address, DataWord key) {
-    Storage storage = getStorageInternal(address);
-    return storage == null ? null : storage.getValue(key);
-  }
-
-  private Storage getStorageInternal(byte[] address) {
     address = TransactionTrace.convertToTronAddress(address);
     if (getAccount(address) == null) {
       return null;
@@ -496,7 +518,7 @@ public class RepositoryImpl implements Repository {
       storage = getStorage(address);
       storageCache.put(addressKey, storage);
     }
-    return storage;
+    return storage.getValue(key);
   }
 
   @Override
@@ -518,11 +540,8 @@ public class RepositoryImpl implements Repository {
       storage = new Storage(address, getStorageRowStore());
     }
     ContractCapsule contract = getContract(address);
-    if (contract != null) {
-      storage.setContractVersion(contract.getContractVersion());
-      if (!ByteUtil.isNullOrZeroArray(contract.getTrxHash())) {
-        storage.generateAddrHash(contract.getTrxHash());
-      }
+    if (contract != null && !ByteUtil.isNullOrZeroArray(contract.getTrxHash())) {
+      storage.generateAddrHash(contract.getTrxHash());
     }
     return storage;
   }
@@ -540,6 +559,11 @@ public class RepositoryImpl implements Repository {
       accountCapsule = createAccount(address, Protocol.AccountType.Normal);
     }
 
+    AccountAssetIssueCapsule accountAssetIssueCapsule = getAccountAssetIssue(address);
+    if (accountAssetIssueCapsule == null) {
+      accountAssetIssueCapsule = createAccountAssetIssue(address);
+    }
+
     long balance = accountCapsule.getBalance();
     if (value == 0) {
       return balance;
@@ -552,8 +576,13 @@ public class RepositoryImpl implements Repository {
     }
     accountCapsule.setBalance(Math.addExact(balance, value));
     Key key = Key.create(address);
-    accountCache.put(key, Value.create(accountCapsule,
-         accountCache.get(key).getType().addType(Type.DIRTY)));
+    Value val = Value.create(accountCapsule.getData(),
+        Type.VALUE_TYPE_DIRTY | accountCache.get(key).getType().getType());
+    accountCache.put(key, val);
+
+    Value V2 = Value.create(accountAssetIssueCapsule.getData(),
+            Type.VALUE_TYPE_DIRTY | accountAssetIssueCache.get(key).getType().getType());
+    accountAssetIssueCache.put(key, V2);
     return accountCapsule.getBalance();
   }
 
@@ -569,18 +598,24 @@ public class RepositoryImpl implements Repository {
       repository = parent;
     }
     commitAccountCache(repository);
+    commitAccountAssetIssueCache(repository);
     commitCodeCache(repository);
     commitContractCache(repository);
     commitStorageCache(repository);
     commitDynamicCache(repository);
-    commitDelegatedResourceCache(repository);
     commitVotesCache(repository);
+    commitAssetIssue(repository);
     commitDelegationCache(repository);
   }
 
   @Override
   public void putAccount(Key key, Value value) {
     accountCache.put(key, value);
+  }
+
+  @Override
+  public void putAccountAssetIssue(Key key, Value value) {
+    accountAssetIssueCache.put(key, value);
   }
 
   @Override
@@ -600,29 +635,43 @@ public class RepositoryImpl implements Repository {
 
   @Override
   public void putAccountValue(byte[] address, AccountCapsule accountCapsule) {
-    accountCache.put(new Key(address),
-        Value.create(accountCapsule, Type.CREATE));
+    Key key = new Key(address);
+    accountCache.put(key, new Value(accountCapsule.getData(), Type.VALUE_TYPE_CREATE));
   }
 
   @Override
-  public void putDynamicProperty(Key key, Value value) {
+  public void putAccountAssetIssueValue(byte[] address, AccountAssetIssueCapsule accountAssetIssueCapsule) {
+    Key key = new Key(address);
+    accountAssetIssueCache.put(key, new Value(accountAssetIssueCapsule.getData(), Type.VALUE_TYPE_CREATE));
+  }
+
+  @Override
+  public void putDynamic(Key key, Value value) {
     dynamicPropertiesCache.put(key, value);
   }
 
   @Override
-  public void putDelegatedResource(Key key, Value value) {
-    delegatedResourceCache.put(key, value);
+  public void putAssetIssue(Key key, Value value) {
+    assetIssueCache.put(key, value);
   }
 
   @Override
-  public void putVotes(Key key, Value value) {
+  public void putVotesCapsule(Key key, Value value) {
     votesCache.put(key, value);
+  }
+
+  @Override
+  public void putAssetIssueValue(byte[] tokenId, AssetIssueCapsule assetIssueCapsule) {
+    Key key = new Key(tokenId);
+    Value value = new Value(assetIssueCapsule.getData(), Type.VALUE_TYPE_CREATE);
+    assetIssueCache.put(key, value);
   }
 
   @Override
   public void putDelegation(Key key, Value value) {
     delegationCache.put(key, value);
   }
+
 
   @Override
   public long addTokenBalance(byte[] address, byte[] tokenId, long value) {
@@ -631,7 +680,14 @@ public class RepositoryImpl implements Repository {
     if (accountCapsule == null) {
       accountCapsule = createAccount(address, Protocol.AccountType.Normal);
     }
-    long balance = accountCapsule.getAssetV2(new String(tokenIdWithoutLeadingZero));
+
+    AccountAssetIssueCapsule accountAssetIssueCapsule = getAccountAssetIssue(address);
+    if (accountAssetIssueCapsule == null) {
+      accountAssetIssueCapsule = createAccountAssetIssue(address);
+    }
+
+    long balance = accountAssetIssueCapsule.getAssetMapV2()
+        .getOrDefault(new String(tokenIdWithoutLeadingZero), new Long(0));
     if (value == 0) {
       return balance;
     }
@@ -642,27 +698,31 @@ public class RepositoryImpl implements Repository {
               + " insufficient balance");
     }
     if (value >= 0) {
-      accountCapsule.addAssetAmountV2(tokenIdWithoutLeadingZero, value, getDynamicPropertiesStore(),
+      accountAssetIssueCapsule.addAssetAmountV2(tokenIdWithoutLeadingZero, value, getDynamicPropertiesStore(),
           getAssetIssueStore());
     } else {
-      accountCapsule
+      accountAssetIssueCapsule
           .reduceAssetAmountV2(tokenIdWithoutLeadingZero, -value, getDynamicPropertiesStore(),
               getAssetIssueStore());
     }
     Key key = Key.create(address);
-    accountCache.put(key, Value.create(accountCapsule,
-         accountCache.get(key).getType().addType(Type.DIRTY)));
-    return accountCapsule.getAssetV2(new String(tokenIdWithoutLeadingZero));
+    Value V = Value.create(accountCapsule.getData(),
+        Type.VALUE_TYPE_DIRTY | accountCache.get(key).getType().getType());
+    accountCache.put(key, V);
+    Value V2 = Value.create(accountAssetIssueCapsule.getData(),
+            Type.VALUE_TYPE_DIRTY | accountAssetIssueCache.get(key).getType().getType());
+    accountAssetIssueCache.put(key, V2);
+    return accountAssetIssueCapsule.getAssetMapV2().get(new String(tokenIdWithoutLeadingZero));
   }
 
   @Override
   public long getTokenBalance(byte[] address, byte[] tokenId) {
-    AccountCapsule accountCapsule = getAccount(address);
-    if (accountCapsule == null) {
+    AccountAssetIssueCapsule accountAssetIssueCapsule = getAccountAssetIssue(address);
+    if (accountAssetIssueCapsule == null) {
       return 0;
     }
     String tokenStr = new String(ByteUtil.stripLeadingZeroes(tokenId));
-    return accountCapsule.getAssetV2(tokenStr);
+    return accountAssetIssueCapsule.getAssetMapV2().getOrDefault(tokenStr, 0L);
   }
 
   @Override
@@ -741,7 +801,19 @@ public class RepositoryImpl implements Repository {
         if (deposit != null) {
           deposit.putAccount(key, value);
         } else {
-          getAccountStore().put(key.getData(), new AccountCapsule(value.getValue()));
+          getAccountStore().put(key.getData(), value.getAccount());
+        }
+      }
+    });
+  }
+
+  private void commitAccountAssetIssueCache(Repository deposit) {
+    accountAssetIssueCache.forEach((key, value) -> {
+      if (value.getType().isCreate() || value.getType().isDirty()) {
+        if (deposit != null) {
+          deposit.putAccountAssetIssue(key, value);
+        } else {
+          getAccountAssetIssueStore().put(key.getData(), value.getAccountAssetIssue());
         }
       }
     });
@@ -753,7 +825,7 @@ public class RepositoryImpl implements Repository {
         if (deposit != null) {
           deposit.putCode(key, value);
         } else {
-          getCodeStore().put(key.getData(), new CodeCapsule(value.getValue()));
+          getCodeStore().put(key.getData(), value.getCode());
         }
       }
     }));
@@ -765,11 +837,7 @@ public class RepositoryImpl implements Repository {
         if (deposit != null) {
           deposit.putContract(key, value);
         } else {
-          ContractCapsule contractCapsule = new ContractCapsule(value.getValue());
-          if (!abiStore.has(key.getData())) {
-            abiStore.put(key.getData(), new AbiCapsule(contractCapsule));
-          }
-          getContractStore().put(key.getData(), contractCapsule);
+          getContractStore().put(key.getData(), value.getContract());
         }
       }
     }));
@@ -792,21 +860,9 @@ public class RepositoryImpl implements Repository {
     dynamicPropertiesCache.forEach(((key, value) -> {
       if (value.getType().isDirty() || value.getType().isCreate()) {
         if (deposit != null) {
-          deposit.putDynamicProperty(key, value);
+          deposit.putDynamic(key, value);
         } else {
-          getDynamicPropertiesStore().put(key.getData(), new BytesCapsule(value.getValue()));
-        }
-      }
-    }));
-  }
-
-  private void commitDelegatedResourceCache(Repository deposit) {
-    delegatedResourceCache.forEach(((key, value) -> {
-      if (value.getType().isDirty() || value.getType().isCreate()) {
-        if (deposit != null) {
-          deposit.putDelegatedResource(key, value);
-        } else {
-          getDelegatedResourceStore().put(key.getData(), new DelegatedResourceCapsule(value.getValue()));
+          getDynamicPropertiesStore().put(key.getData(), value.getDynamicProperties());
         }
       }
     }));
@@ -816,12 +872,28 @@ public class RepositoryImpl implements Repository {
     votesCache.forEach(((key, value) -> {
       if (value.getType().isDirty() || value.getType().isCreate()) {
         if (deposit != null) {
-          deposit.putVotes(key, value);
+          deposit.putVotesCapsule(key, value);
         } else {
-          getVotesStore().put(key.getData(), new VotesCapsule(value.getValue()));
+          getVotesStore().put(key.getData(), value.getVotes());
         }
       }
     }));
+  }
+
+  private void commitAssetIssue(Repository deposit) {
+    AssetIssueStore assetIssueStoreFinal = Commons
+        .getAssetIssueStoreFinal(dynamicPropertiesStore, assetIssueStore, assetIssueV2Store);
+
+    assetIssueCache.forEach((key, value) -> {
+      if (value.getType().isCreate() || value.getType().isDirty()) {
+        if (deposit != null) {
+          deposit.putAssetIssue(key, value);
+        } else {
+          assetIssueStoreFinal
+              .put(key.getData(), value.getAssetIssue());
+        }
+      }
+    });
   }
 
   private void commitDelegationCache(Repository deposit) {
@@ -830,7 +902,7 @@ public class RepositoryImpl implements Repository {
         if (deposit != null) {
           deposit.putDelegation(key, value);
         } else {
-          getDelegationStore().put(key.getData(), new BytesCapsule(value.getValue()));
+          getDelegationStore().put(key.getData(), value.getBytes());
         }
       }
     });
@@ -852,8 +924,23 @@ public class RepositoryImpl implements Repository {
         getDynamicPropertiesStore().getLatestBlockHeaderTimestamp(), withDefaultPermission,
         getDynamicPropertiesStore());
 
-    accountCache.put(key, Value.create(account, Type.CREATE));
+    accountCache.put(key, new Value(account.getData(), Type.VALUE_TYPE_CREATE));
     return account;
+  }
+
+  @Override
+  public void saveTokenIdNum(long num) {
+    this.updateDynamic(DynamicPropertiesStore.getTOKEN_ID_NUM(),
+        new BytesCapsule(ByteArray.fromLong(num)));
+  }
+
+  @Override
+  public long getTokenIdNum() {
+    return Optional.ofNullable(this.getDynamic(DynamicPropertiesStore.getTOKEN_ID_NUM()))
+        .map(BytesCapsule::getData)
+        .map(ByteArray::toLong)
+        .orElseThrow(
+            () -> new IllegalArgumentException("error in contract not found TOKEN_ID_NUM"));
   }
 
   //The unit is trx
@@ -864,42 +951,17 @@ public class RepositoryImpl implements Repository {
     saveTotalNetWeight(totalNetWeight);
   }
 
-  //The unit is trx
-  @Override
-  public void addTotalEnergyWeight(long amount) {
-    long totalEnergyWeight = getTotalEnergyWeight();
-    totalEnergyWeight += amount;
-    saveTotalEnergyWeight(totalEnergyWeight);
-  }
-
   @Override
   public void saveTotalNetWeight(long totalNetWeight) {
-    updateDynamicProperty(TOTAL_NET_WEIGHT,
-        new BytesCapsule(ByteArray.fromLong(totalNetWeight)));
-  }
-
-  @Override
-  public void saveTotalEnergyWeight(long totalEnergyWeight) {
-    updateDynamicProperty(TOTAL_ENERGY_WEIGHT,
-        new BytesCapsule(ByteArray.fromLong(totalEnergyWeight)));
+    updateDynamic(TOTAL_NET_WEIGHT, new BytesCapsule(ByteArray.fromLong(totalNetWeight)));
   }
 
   @Override
   public long getTotalNetWeight() {
-    return Optional.ofNullable(getDynamicProperty(TOTAL_NET_WEIGHT))
+    return Optional.ofNullable(getDynamic(TOTAL_NET_WEIGHT))
         .map(BytesCapsule::getData)
         .map(ByteArray::toLong)
         .orElseThrow(
             () -> new IllegalArgumentException("not found TOTAL_NET_WEIGHT"));
   }
-
-  @Override
-  public long getTotalEnergyWeight() {
-    return Optional.ofNullable(getDynamicProperty(TOTAL_ENERGY_WEIGHT))
-        .map(BytesCapsule::getData)
-        .map(ByteArray::toLong)
-        .orElseThrow(
-            () -> new IllegalArgumentException("not found TOTAL_ENERGY_WEIGHT"));
-  }
-
 }

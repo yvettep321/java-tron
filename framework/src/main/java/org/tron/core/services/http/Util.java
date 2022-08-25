@@ -43,6 +43,7 @@ import org.tron.core.config.args.Args;
 import org.tron.core.db.TransactionTrace;
 import org.tron.core.services.http.JsonFormat.ParseException;
 import org.tron.protos.Protocol.Account;
+import org.tron.protos.Protocol.AccountAssetIssue;
 import org.tron.protos.Protocol.Block;
 import org.tron.protos.Protocol.Transaction;
 import org.tron.protos.Protocol.Transaction.Contract.ContractType;
@@ -61,6 +62,7 @@ public class Util {
   public static final String CONTRACT_TYPE = "contractType";
   public static final String EXTRA_DATA = "extra_data";
   public static final String PARAMETER = "parameter";
+  public static final String ASSET_ISSUED_ID = "asset_issued_ID";
 
   public static String printTransactionFee(String transactionFee) {
     JSONObject jsonObject = new JSONObject();
@@ -465,11 +467,41 @@ public class Util {
       return JsonFormat.printToString(account, false);
     } else {
       JSONObject accountJson = JSONObject.parseObject(JsonFormat.printToString(account, false));
-      String assetId = accountJson.get("asset_issued_ID").toString();
-      accountJson.put("asset_issued_ID",
+      String assetId = accountJson.get(ASSET_ISSUED_ID).toString();
+      accountJson.put(ASSET_ISSUED_ID,
           ByteString.copyFrom(ByteArray.fromHexString(assetId)).toStringUtf8());
       return accountJson.toJSONString();
     }
+  }
+
+  public static String convertOutput(Account account, AccountAssetIssue accountAssetIssue) {
+
+    if (accountAssetIssue.getAssetIssuedID().isEmpty()) {
+      return JsonFormat.printToString(account, false);
+    } else {
+      account = convertAccount(account, accountAssetIssue);
+      JSONObject accountJson = JSONObject.parseObject(JsonFormat.printToString(account, false));
+      String assetId = accountJson.get(ASSET_ISSUED_ID).toString();
+      accountJson.put(ASSET_ISSUED_ID,
+          ByteString.copyFrom(ByteArray.fromHexString(assetId)).toStringUtf8());
+      return accountJson.toJSONString();
+    }
+  }
+
+  public static Account convertAccount(Account account, AccountAssetIssue accountAssetIssue) {
+    return account.toBuilder()
+            .setAddress(accountAssetIssue.getAddress())
+            .setAssetIssuedID(accountAssetIssue.getAssetIssuedID())
+            .setAssetIssuedName(accountAssetIssue.getAssetIssuedName())
+            .putAllAsset(accountAssetIssue.getAssetMap())
+            .putAllAssetV2(accountAssetIssue.getAssetV2Map())
+
+            .putAllFreeAssetNetUsage(accountAssetIssue.getFreeAssetNetUsageMap())
+            .putAllFreeAssetNetUsageV2(accountAssetIssue.getFreeAssetNetUsageV2Map())
+
+            .putAllLatestAssetOperationTime(accountAssetIssue.getLatestAssetOperationTimeMap())
+            .putAllLatestAssetOperationTimeV2(accountAssetIssue.getLatestAssetOperationTimeV2Map())
+            .build();
   }
 
   public static void printAccount(Account reply, HttpServletResponse response, Boolean visible)
@@ -479,6 +511,21 @@ public class Util {
         response.getWriter().println(JsonFormat.printToString(reply, true));
       } else {
         response.getWriter().println(convertOutput(reply));
+      }
+    } else {
+      response.getWriter().println("{}");
+    }
+  }
+
+  public static void printAccount(Account reply, AccountAssetIssue accountAssetIssue,
+                                  HttpServletResponse response, Boolean visible)
+          throws java.io.IOException {
+    if (reply != null) {
+      if (visible) {
+        response.getWriter().println(
+                JsonFormat.printToString(convertAccount(reply, accountAssetIssue), true));
+      } else {
+        response.getWriter().println(convertOutput(reply, accountAssetIssue));
       }
     } else {
       response.getWriter().println("{}");

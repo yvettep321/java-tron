@@ -22,7 +22,6 @@ package org.tron.common.utils;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.NoSuchElementException;
 import java.util.Set;
 import org.tron.core.db.ByteArrayWrapper;
 
@@ -69,10 +68,11 @@ public class ByteArraySet implements Set<byte[]> {
 
       @Override
       public byte[] next() {
-        if (!hasNext()) {
-          throw new NoSuchElementException();
+        ByteArrayWrapper next = it.next();
+        if (next != null) {
+          return next.getData();
         }
-        return it.next().getData();
+        return null;
       }
 
       @Override

@@ -158,11 +158,6 @@ message Account {
   //Freeze and provide balances to other accounts
   int64 delegated_frozen_balance_for_bandwidth = 42;
 
-  int64 old_tron_power = 46;
-  Frozen tron_power = 47;
-
-  bool asset_optimized = 60;
-
   // this account create time
   int64 create_time = 0x09;
   // this last operation time, including transfer, voting and so on. //FIXME fix grammar
@@ -214,6 +209,39 @@ message Account {
   Permission owner_permission = 31;
   Permission witness_permission = 32;
   repeated Permission active_permission = 33;
+
+  //vote power,include frozen bandwidth and frozen energy
+  int64 vote_power_413 = 60;
+}
+
+/* AccountAssetIssue */
+message AccountAssetIssue {
+
+  // the create address
+  bytes address = 3;
+
+  message Frozen {
+    int64 frozen_balance = 1; // the frozen trx balance
+    int64 expire_time = 2; // the expire time
+  }
+  // the other asset owned by this account
+  map<string, int64> asset = 6;
+
+  // the other asset owned by this account，key is assetId
+  map<string, int64> assetV2 = 56;
+
+  bytes asset_issued_name = 17;
+  bytes asset_issued_ID = 57;
+
+  // frozen asset(for asset issuer)
+  repeated Frozen frozen_supply = 16;
+
+  map<string, int64> latest_asset_operation_time = 18;
+  map<string, int64> latest_asset_operation_timeV2 = 58;
+
+  map<string, int64> free_asset_net_usage = 20;
+  map<string, int64> free_asset_net_usageV2 = 59;
+
 }
 
 message Key {
@@ -375,7 +403,6 @@ message Transaction {
       JVM_STACK_OVER_FLOW = 12;
       UNKNOWN = 13;
       TRANSFER_FAILED = 14;
-      INVALID_CODE = 15;
     }
     int64 fee = 1;
     code ret = 2;
@@ -551,7 +578,7 @@ enum ReasonCode {
   TOO_MANY_PEERS = 0x04;
   DUPLICATE_PEER = 0x05;
   INCOMPATIBLE_PROTOCOL = 0x06;
-  RANDOM_ELIMINATION = 0x07;
+  NULL_IDENTITY = 0x07;
   PEER_QUITING = 0x08;
   UNEXPECTED_IDENTITY = 0x09;
   LOCAL_IDENTITY = 0x0A;
@@ -569,7 +596,6 @@ enum ReasonCode {
   TIME_OUT = 0x20;
   CONNECT_FAIL = 0x21;
   TOO_MANY_PEERS_WITH_SAME_IP = 0x22;
-  LIGHT_NODE_SYNC_FAIL = 0x23;
   UNKNOWN = 0xFF;
 }
 
@@ -591,8 +617,6 @@ message HelloMessage {
   BlockId headBlockId = 6;
   bytes address = 7;
   bytes signature = 8;
-  int32 nodeType = 9;
-  int64 lowestBlockNum = 10;
 }
 
 message InternalTransaction {
@@ -612,7 +636,6 @@ message InternalTransaction {
   repeated CallValueInfo callValueInfo = 4;
   bytes note = 5;
   bool rejected = 6;
-  string extra = 7;
 }
 
 message DelegatedResourceAccountIndex {
